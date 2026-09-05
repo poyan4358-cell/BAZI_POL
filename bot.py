@@ -3,7 +3,7 @@ import re
 import random
 import string
 import sqlite3
-from datetime import datetime
+import time
 
 from telegram import Update
 from telegram.ext import (
@@ -25,7 +25,10 @@ if not TOKEN:
 
 DB = "bazi_pol.db"
 
+# =========================
 # واحدهای پول
+# =========================
+
 UNITS = {
     "میل": 10**6,
     "میلیون": 10**6,
@@ -102,15 +105,16 @@ conn.commit()
 # =========================
 
 def fa_to_en(text):
-    table = str.maketrans(
-        "۰۱۲۳۴۵۶۷۸۹",
-        "0123456789"
+    return str(text).translate(
+        str.maketrans(
+            "۰۱۲۳۴۵۶۷۸۹",
+            "0123456789"
+        )
     )
-    return text.translate(table)
 
 
 def fmt(number):
-    return f"{number:,}"
+    return f"{int(number):,}"
 
 
 def get_user(user):
@@ -142,19 +146,12 @@ def get_user(user):
 
 
 def update_highest(user_id):
-    cur.execute(
-        "SELECT wallet FROM users WHERE user_id = ?",
-        (user_id,)
-    )
-    row = cur.fetchone()
-
-    if row:
-        cur.execute("""
-            UPDATE users
-            SET highest = MAX(highest, wallet)
-            WHERE user_id = ?
-        """, (user_id,))
-        conn.commit()
+    cur.execute("""
+        UPDATE users
+        SET highest = MAX(highest, wallet)
+        WHERE user_id = ?
+    """, (user_id,))
+    conn.commit()
 
 
 def add_wallet(user_id, amount):
@@ -177,22 +174,13 @@ def remove_wallet(user_id, amount):
 
 
 def parse_amount(text):
-    """
-    مثال‌ها:
-    4 میل
-    4000000 سکه
-    40 میلیون
-    40,000,000
-    4m
-    2 بیل
-    """
-
     text = fa_to_en(text).strip().lower()
+
     text = text.replace("،", ",")
     text = text.replace("تومان", "")
     text = text.replace("سکه", "")
+    text = text.strip()
 
-    # عدد + واحد
     pattern = r"^\s*([\d,]+(?:\.\d+)?)\s*([a-zA-Zآ-ی]+)?\s*$"
     match = re.match(pattern, text)
 
@@ -210,13 +198,11 @@ def parse_amount(text):
     if number <= 0:
         return None
 
-    if unit:
-        unit = unit.strip()
-
-    # بدون واحد = خود سکه
     multiplier = 1
 
     if unit:
+        unit = unit.strip()
+
         if unit not in UNITS:
             return None
 
@@ -226,13 +212,6 @@ def parse_amount(text):
 
 
 def get_amount_from_game(text):
-    """
-    از متن‌هایی مثل:
-    سنگ 4 میل
-    شیر 50 میل
-    راست 10 میل
-    """
-
     parts = text.strip().split(maxsplit=1)
 
     if len(parts) < 2:
@@ -242,21 +221,28 @@ def get_amount_from_game(text):
 
 
 async def is_admin(update):
-    if not update.effective_chat or update.effective_chat.type == "private":
+    chat = update.effective_chat
+
+    if not chat or chat.type == "private":
         return False
 
-    member = await update.effective_chat.get_member(
+    member = await chat.get_member(
         update.effective_user.id
     )
 
-    return member.status in ("administrator", "creator")
+    return member.status in (
+        "administrator",
+        "creator"
+    )
 
 
 async def is_owner(update):
-    if not update.effective_chat or update.effective_chat.type == "private":
+    chat = update.effective_chat
+
+    if not chat or chat.type == "private":
         return False
 
-    member = await update.effective_chat.get_member(
+    member = await chat.get_member(
         update.effective_user.id
     )
 
@@ -268,6 +254,7 @@ def group_active(chat_id):
         "SELECT active FROM groups WHERE chat_id = ?",
         (chat_id,)
     )
+
     row = cur.fetchone()
 
     return bool(row and row["active"])
@@ -279,7 +266,10 @@ def set_group_active(chat_id, active):
         VALUES (?, ?)
         ON CONFLICT(chat_id)
         DO UPDATE SET active = excluded.active
-    """, (chat_id, int(active)))
+    """, (
+        chat_id,
+        int(active)
+    ))
 
     conn.commit()
 
@@ -310,11 +300,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         "💰 به بات پولمون خوش اومدی!\n\n"
-        "برای استفاده از بات، منو به گروه اضافه کن.\n"
-        "بعد داخل گروه بنویس:\n\n"
+        "بات رو به گروه اضافه کن و داخل گروه بنویس:\n"
         "فعال\n\n"
-        "📖 برای راهنما هم بنویس:\n"
-        "راهنما"
+        "📖 راهنما"
     )
 
 
@@ -329,31 +317,79 @@ async def activation(update, context):
     text = update.message.text.strip()
 
     if text == "فعال":
+
         if not await is_admin(update):
             await update.message.reply_text(
                 "⛔ فقط ادمین گروه می‌تونه بات رو فعال کنه."
             )
             return
 
-        set_group_active(update.effective_chat.id, True)
+        set_group_active(
+            update.effective_chat.id,
+            True
+        )
 
         await update.message.reply_text(
-            "بات فعال شد✅\n\n"
+            "بات فعال شد ✅\n\n"
             "💰 بازی شروع شد!"
         )
 
-    elif text == "غیر فعال":
+    elif text in ("غیرفعال", "غیر فعال"):
+
         if not await is_admin(update):
             await update.message.reply_text(
                 "⛔ فقط ادمین گروه می‌تونه بات رو غیرفعال کنه."
             )
             return
 
-        set_group_active(update.effective_chat.id, False)
+        set_group_active(
+            update.effective_chat.id,
+            False
+        )
 
         await update.message.reply_text(
-            "بات غیرفعال شد⛔"
+            "بات غیرفعال شد ⛔"
         )
+
+
+# =========================
+# راهنما
+# =========================
+
+async def help_command(update, context):
+    if not await ensure_active(update):
+        return
+
+    await update.message.reply_text(
+        "📚 راهنمای بات پولمون\n\n"
+
+        "💰 اقتصاد:\n"
+        "موجودی\n"
+        "واریز 10 میل\n"
+        "برداشت 10 میل\n"
+        "انتقال 10 میل (با Reply)\n\n"
+
+        "🎮 بازی‌ها:\n"
+        "سنگ 10 میل\n"
+        "کاغذ 10 میل\n"
+        "قیچی 10 میل\n"
+        "شیر 10 میل\n"
+        "خط 10 میل\n"
+        "راست 10 میل\n"
+        "چپ 10 میل\n\n"
+
+        "🏆 رتبه‌بندی:\n"
+        "ثروتمندان\n\n"
+
+        "🎫 سریال:\n"
+        "ساخت سریال 20 بیل\n\n"
+
+        "⛏ ماینر:\n"
+        "ماینر\n\n"
+
+        "برای شروع، موجودی خودت رو ببین:"
+        "\nموجودی"
+    )
 
 
 # =========================
@@ -387,15 +423,19 @@ async def bank(update, context):
     if not await ensure_active(update):
         return
 
-    text = fa_to_en(update.message.text.strip())
+    text = update.message.text.strip()
 
-    # واریز
     if text.startswith("واریز "):
-        amount = parse_amount(text[6:])
+
+        amount = parse_amount(
+            text[6:]
+        )
 
         if not amount:
             await update.message.reply_text(
-                "❌ مقدار اشتباهه.\nمثال:\nواریز 10 میل"
+                "❌ مقدار اشتباهه.\n"
+                "مثال:\n"
+                "واریز 10 میل"
             )
             return
 
@@ -407,29 +447,38 @@ async def bank(update, context):
             )
             return
 
-        remove_wallet(user["user_id"], amount)
+        remove_wallet(
+            user["user_id"],
+            amount
+        )
 
         cur.execute("""
             UPDATE users
             SET bank = bank + ?
             WHERE user_id = ?
-        """, (amount, user["user_id"]))
+        """, (
+            amount,
+            user["user_id"]
+        ))
 
         conn.commit()
 
         await update.message.reply_text(
             f"🏦 واریز انجام شد.\n"
-            f"مبلغ: {fmt(amount)}\n"
-            f"🪙 کیف پول: {fmt(user['wallet'] - amount)}"
+            f"💰 مبلغ: {fmt(amount)}"
         )
 
-    # برداشت
     elif text.startswith("برداشت "):
-        amount = parse_amount(text[7:])
+
+        amount = parse_amount(
+            text[7:]
+        )
 
         if not amount:
             await update.message.reply_text(
-                "❌ مقدار اشتباهه.\nمثال:\nبرداشت 10 میل"
+                "❌ مقدار اشتباهه.\n"
+                "مثال:\n"
+                "برداشت 10 میل"
             )
             return
 
@@ -443,7 +492,8 @@ async def bank(update, context):
 
         cur.execute("""
             UPDATE users
-            SET bank = bank - ?, wallet = wallet + ?
+            SET bank = bank - ?,
+                wallet = wallet + ?
             WHERE user_id = ?
         """, (
             amount,
@@ -452,12 +502,14 @@ async def bank(update, context):
         ))
 
         conn.commit()
-        update_highest(user["user_id"])
+
+        update_highest(
+            user["user_id"]
+        )
 
         await update.message.reply_text(
             f"🏦 برداشت انجام شد.\n"
-            f"مبلغ: {fmt(amount)}\n"
-            f"🪙 به کیف پول اضافه شد."
+            f"💰 مبلغ: {fmt(amount)}"
         )
 
 
@@ -473,40 +525,45 @@ async def transfer(update, context):
 
     if not message.reply_to_message:
         await message.reply_text(
-            "❌ برای انتقال باید روی پیام طرف Reply کنی.\n\n"
+            "❌ روی پیام طرف Reply کن.\n\n"
             "مثال:\n"
             "انتقال 500 بیل"
         )
         return
 
-    if message.reply_to_message.from_user.is_bot:
+    receiver = message.reply_to_message.from_user
+
+    if receiver.is_bot:
         await message.reply_text(
-            "❌ نمی‌تونی به ربات پول انتقال بدی."
+            "❌ نمی‌تونی به ربات پول بدی."
         )
         return
 
-    sender = get_user(update.effective_user)
-    receiver_user = message.reply_to_message.from_user
+    sender = get_user(
+        update.effective_user
+    )
 
-    if sender["user_id"] == receiver_user.id:
+    if sender["user_id"] == receiver.id:
         await message.reply_text(
-            "😂 داداش انتقال به خودت که معنی نداره."
+            "😂 انتقال به خودت که معنی نداره."
         )
         return
 
     amount = parse_amount(
-        message.text.replace("انتقال", "", 1).strip()
+        message.text.replace(
+            "انتقال",
+            "",
+            1
+        ).strip()
     )
 
     if not amount:
         await message.reply_text(
-            "❌ مقدار انتقال اشتباهه.\n"
-            "مثال:\n"
+            "❌ مثال:\n"
             "انتقال 500 بیل"
         )
         return
 
-    # مالک گروه پول نامحدود دارد
     owner = await is_owner(update)
 
     if not owner and sender["wallet"] < amount:
@@ -515,38 +572,49 @@ async def transfer(update, context):
         )
         return
 
-    get_user(receiver_user)
+    get_user(receiver)
 
     if not owner:
-        remove_wallet(sender["user_id"], amount)
+        remove_wallet(
+            sender["user_id"],
+            amount
+        )
 
-    add_wallet(receiver_user.id, amount)
+    add_wallet(
+        receiver.id,
+        amount
+    )
 
-    await message.reply_text(
+    await update.message.reply_text(
         "💸 انتقال انجام شد!\n\n"
         f"👤 فرستنده: {sender['first_name']}\n"
-        f"👤 گیرنده: {receiver_user.first_name}\n"
+        f"👤 گیرنده: {receiver.first_name}\n"
         f"💰 مبلغ: {fmt(amount)}"
     )
 
 
 # =========================
-# بازی سنگ کاغذ قیچی
+# سنگ کاغذ قیچی
 # =========================
 
 async def rps(update, context, choice):
     if not await ensure_active(update):
         return
 
-    amount = get_amount_from_game(update.message.text)
+    amount = get_amount_from_game(
+        update.message.text
+    )
 
     if not amount:
         await update.message.reply_text(
-            f"❌ مثال درست:\n{choice} 4 میل"
+            f"❌ مثال:\n{choice} 4 میل"
         )
         return
 
-    user = get_user(update.effective_user)
+    user = get_user(
+        update.effective_user
+    )
+
     owner = await is_owner(update)
 
     if not owner and user["wallet"] < amount:
@@ -555,9 +623,11 @@ async def rps(update, context, choice):
         )
         return
 
-    bot_choice = random.choice(
-        ["سنگ", "کاغذ", "قیچی"]
-    )
+    bot_choice = random.choice([
+        "سنگ",
+        "کاغذ",
+        "قیچی"
+    ])
 
     if choice == bot_choice:
         result = "draw"
@@ -577,34 +647,46 @@ async def rps(update, context, choice):
     before = user["wallet"]
 
     if not owner:
+
         if result == "win":
-            add_wallet(user["user_id"], amount)
+
+            add_wallet(
+                user["user_id"],
+                amount
+            )
+
             cur.execute("""
-                UPDATE users SET wins = wins + 1
+                UPDATE users
+                SET wins = wins + 1
                 WHERE user_id = ?
             """, (user["user_id"],))
-            conn.commit()
 
         elif result == "lose":
-            remove_wallet(user["user_id"], amount)
+
+            remove_wallet(
+                user["user_id"],
+                amount
+            )
+
             cur.execute("""
-                UPDATE users SET losses = losses + 1
+                UPDATE users
+                SET losses = losses + 1
                 WHERE user_id = ?
             """, (user["user_id"],))
-            conn.commit()
 
-    after = before
+        conn.commit()
 
     if result == "win":
-        after = before + amount
         title = "🎉 بردی!"
+        after = before + amount
 
     elif result == "lose":
-        after = before - amount
         title = "💀 باختی!"
+        after = before - amount
 
     else:
         title = "🤝 مساوی شد!"
+        after = before
 
     await update.message.reply_text(
         f"🎮 سنگ کاغذ قیچی\n\n"
@@ -625,15 +707,20 @@ async def right_left(update, context, choice):
     if not await ensure_active(update):
         return
 
-    amount = get_amount_from_game(update.message.text)
+    amount = get_amount_from_game(
+        update.message.text
+    )
 
     if not amount:
         await update.message.reply_text(
-            f"❌ مثال درست:\n{choice} 10 میل"
+            f"❌ مثال:\n{choice} 10 میل"
         )
         return
 
-    user = get_user(update.effective_user)
+    user = get_user(
+        update.effective_user
+    )
+
     owner = await is_owner(update)
 
     if not owner and user["wallet"] < amount:
@@ -642,38 +729,50 @@ async def right_left(update, context, choice):
         )
         return
 
-    bot_choice = random.choice(["راست", "چپ"])
+    bot_choice = random.choice([
+        "راست",
+        "چپ"
+    ])
+
     before = user["wallet"]
 
     if choice == bot_choice:
-        result = "win"
 
         if not owner:
-            add_wallet(user["user_id"], amount)
+            add_wallet(
+                user["user_id"],
+                amount
+            )
 
             cur.execute("""
-                UPDATE users SET wins = wins + 1
+                UPDATE users
+                SET wins = wins + 1
                 WHERE user_id = ?
             """, (user["user_id"],))
+
             conn.commit()
 
         title = "🎉 بردی!"
+        after = before + amount
 
     else:
-        result = "lose"
 
         if not owner:
-            remove_wallet(user["user_id"], amount)
+            remove_wallet(
+                user["user_id"],
+                amount
+            )
 
             cur.execute("""
-                UPDATE users SET losses = losses + 1
+                UPDATE users
+                SET losses = losses + 1
                 WHERE user_id = ?
             """, (user["user_id"],))
+
             conn.commit()
 
         title = "💀 باختی!"
-
-    after = before + amount if result == "win" else before - amount
+        after = before - amount
 
     await update.message.reply_text(
         f"↔️ راست چپ\n\n"
@@ -694,15 +793,20 @@ async def coin_game(update, context, choice):
     if not await ensure_active(update):
         return
 
-    amount = get_amount_from_game(update.message.text)
+    amount = get_amount_from_game(
+        update.message.text
+    )
 
     if not amount:
         await update.message.reply_text(
-            f"❌ مثال درست:\n{choice} 50 میل"
+            f"❌ مثال:\n{choice} 50 میل"
         )
         return
 
-    user = get_user(update.effective_user)
+    user = get_user(
+        update.effective_user
+    )
+
     owner = await is_owner(update)
 
     if not owner and user["wallet"] < amount:
@@ -711,38 +815,50 @@ async def coin_game(update, context, choice):
         )
         return
 
-    bot_choice = random.choice(["شیر", "خط"])
+    bot_choice = random.choice([
+        "شیر",
+        "خط"
+    ])
+
     before = user["wallet"]
 
     if choice == bot_choice:
-        result = "win"
 
         if not owner:
-            add_wallet(user["user_id"], amount)
+            add_wallet(
+                user["user_id"],
+                amount
+            )
 
             cur.execute("""
-                UPDATE users SET wins = wins + 1
+                UPDATE users
+                SET wins = wins + 1
                 WHERE user_id = ?
             """, (user["user_id"],))
+
             conn.commit()
 
         title = "🎉 بردی!"
+        after = before + amount
 
     else:
-        result = "lose"
 
         if not owner:
-            remove_wallet(user["user_id"], amount)
+            remove_wallet(
+                user["user_id"],
+                amount
+            )
 
             cur.execute("""
-                UPDATE users SET losses = losses + 1
+                UPDATE users
+                SET losses = losses + 1
                 WHERE user_id = ?
             """, (user["user_id"],))
+
             conn.commit()
 
         title = "💀 باختی!"
-
-    after = before + amount if result == "win" else before - amount
+        after = before - amount
 
     await update.message.reply_text(
         f"🪙 شیر یا خط\n\n"
@@ -760,11 +876,16 @@ async def coin_game(update, context, choice):
 # =========================
 
 def generate_serial():
+
     chars = string.ascii_letters + string.digits
 
     while True:
+
         code = "".join(
-            random.choices(chars, k=20)
+            random.choices(
+                chars,
+                k=20
+            )
         )
 
         cur.execute(
@@ -777,6 +898,7 @@ def generate_serial():
 
 
 async def create_serial(update, context):
+
     if update.effective_chat.type == "private":
         await update.message.reply_text(
             "❌ ساخت سریال باید داخل گروه انجام بشه."
@@ -789,10 +911,12 @@ async def create_serial(update, context):
         )
         return
 
-    text = update.message.text
-
     amount = parse_amount(
-        text.replace("ساخت سریال", "", 1).strip()
+        update.message.text.replace(
+            "ساخت سریال",
+            "",
+            1
+        ).strip()
     )
 
     if not amount:
@@ -807,33 +931,39 @@ async def create_serial(update, context):
     cur.execute("""
         INSERT INTO serials(code, amount)
         VALUES (?, ?)
-    """, (code, amount))
+    """, (
+        code,
+        amount
+    ))
 
     conn.commit()
 
     try:
+
         await context.bot.send_message(
             chat_id=update.effective_user.id,
             text=(
                 "🎫 سریال جدید ساخته شد!\n\n"
                 f"💰 ارزش: {fmt(amount)}\n"
-                f"🔐 سریال:\n`{code}`"
-            ),
-            parse_mode="Markdown"
+                f"🔐 سریال:\n{code}"
+            )
         )
 
         await update.message.reply_text(
-            "✅ سریال ساخته شد و در پیوی برات ارسال کردم."
+            "✅ سریال ساخته شد و در پیویت ارسال شد."
         )
 
     except Exception:
+
         await update.message.reply_text(
-            "⚠️ سریال ساخته شد، ولی نتونستم به پیویت پیام بدم.\n"
+            "⚠️ سریال ساخته شد، ولی نتونستم "
+            "به پیویت پیام بدم.\n"
             "اول بات رو در پیوی Start کن."
         )
 
 
 async def redeem_serial(update, context):
+
     if not await ensure_active(update):
         return
 
@@ -842,7 +972,10 @@ async def redeem_serial(update, context):
     if len(text) != 20:
         return
 
-    if not re.fullmatch(r"[A-Za-z0-9]{20}", text):
+    if not re.fullmatch(
+        r"[A-Za-z0-9]{20}",
+        text
+    ):
         return
 
     cur.execute("""
@@ -855,7 +988,9 @@ async def redeem_serial(update, context):
     if not serial:
         return
 
-    user = get_user(update.effective_user)
+    user = get_user(
+        update.effective_user
+    )
 
     add_wallet(
         user["user_id"],
@@ -864,62 +999,8 @@ async def redeem_serial(update, context):
 
     cur.execute("""
         UPDATE serials
-        SET used = 1, used_by = ?
+        SET used = 1,
+            used_by = ?
         WHERE code = ?
     """, (
-        user["user_id"],
-        text
-    ))
-
-    conn.commit()
-
-    await update.message.reply_text(
-        "🎫 سریال با موفقیت فعال شد!\n\n"
-        f"💰 مبلغ اضافه شده:\n"
-        f"{fmt(serial['amount'])}"
-    )
-
-
-# =========================
-# جدول ثروتمندان
-# =========================
-
-async def leaderboard(update, context):
-    if not await ensure_active(update):
-        return
-
-    cur.execute("""
-        SELECT *
-        FROM users
-        ORDER BY wallet DESC
-        LIMIT 10
-    """)
-
-    rows = cur.fetchall()
-
-    if not rows:
-        await update.message.reply_text(
-            "هنوز کسی پولی نداره 😂"
-        )
-        return
-
-    text = "🏆 ثروتمندترین‌ها\n\n"
-
-    for i, row in enumerate(rows, 1):
-        name = row["first_name"] or "بدون نام"
-
-        text += (
-            f"{i}. {name}\n"
-            f"🪙 {fmt(row['wallet'])}\n\n"
-        )
-
-    await update.message.reply_text(text)
-
-
-# =========================
-# ماینر
-# =========================
-
-async def miners(update, context):
-    if not await ensure_active(update):
-    
+ 
