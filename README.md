@@ -1,1 +1,0 @@
-# BAZI_POL
