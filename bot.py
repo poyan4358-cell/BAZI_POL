@@ -14,11 +14,11 @@ from telegram.ext import Application, MessageHandler, ContextTypes, filters
 # =========================================================
 
 TOKEN = "توکن_ربات_خودت_را_اینجا_بگذار"
-OWNER_ID = 123456789  # آیدی عددی خودت
+OWNER_ID = 123456789
 
 DB_FILE = "moltaf_kid.db"
 
-# موجودی خیلی بزرگ برای صاحب ربات
+# موجودی بسیار زیاد صاحب ربات
 OWNER_MONEY = 10**100
 
 
@@ -70,10 +70,13 @@ db.commit()
 
 
 # =========================================================
-# کاربران
+# ابزارهای عمومی
 # =========================================================
 
 def ensure_user(user):
+    if not user:
+        return
+
     db.execute("""
         INSERT INTO users
         (user_id, username, first_name, wallet, bank, record)
@@ -86,6 +89,7 @@ def ensure_user(user):
         user.username or "",
         user.first_name or ""
     ))
+
     db.commit()
 
 
@@ -98,7 +102,7 @@ def get_wallet(user_id):
         (user_id,)
     ).fetchone()
 
-    return row["wallet"] if row else 0
+    return int(row["wallet"]) if row else 0
 
 
 def set_wallet(user_id, amount):
@@ -109,6 +113,7 @@ def set_wallet(user_id, amount):
         "UPDATE users SET wallet=? WHERE user_id=?",
         (max(0, int(amount)), user_id)
     )
+
     db.commit()
 
 
@@ -120,6 +125,7 @@ def add_wallet(user_id, amount):
         "UPDATE users SET wallet=wallet+? WHERE user_id=?",
         (int(amount), user_id)
     )
+
     db.commit()
 
 
@@ -129,7 +135,7 @@ def get_bank(user_id):
         (user_id,)
     ).fetchone()
 
-    return row["bank"] if row else 0
+    return int(row["bank"]) if row else 0
 
 
 def add_bank(user_id, amount):
@@ -137,6 +143,7 @@ def add_bank(user_id, amount):
         "UPDATE users SET bank=bank+? WHERE user_id=?",
         (int(amount), user_id)
     )
+
     db.commit()
 
 
@@ -153,7 +160,11 @@ def update_record(user_id):
             ELSE record
         END
         WHERE user_id=?
-    """, (wallet, wallet, user_id))
+    """, (
+        wallet,
+        wallet,
+        user_id
+    ))
 
     db.commit()
 
@@ -172,14 +183,17 @@ def get_rank(user_id):
 
     wallet = get_wallet(user_id)
 
-    count = db.execute("""
+    row = db.execute("""
         SELECT COUNT(*) AS c
         FROM users
         WHERE wallet > ?
         AND user_id != ?
-    """, (wallet, OWNER_ID)).fetchone()["c"]
+    """, (
+        wallet,
+        OWNER_ID
+    )).fetchone()
 
-    return count + 2
+    return int(row["c"]) + 2
 
 
 # =========================================================
@@ -199,8 +213,10 @@ def activate_group(chat_id):
     db.execute("""
         INSERT INTO groups_active(chat_id, active)
         VALUES (?, 1)
-        ON CONFLICT(chat_id) DO UPDATE SET active=1
+        ON CONFLICT(chat_id)
+        DO UPDATE SET active=1
     """, (chat_id,))
+
     db.commit()
 
 
@@ -219,8 +235,10 @@ UNITS = {
 
 def parse_money(text):
     text = text.strip().lower()
+
     text = text.replace(",", "")
     text = text.replace("٬", "")
+    text = text.replace(" ", "")
 
     if text in ("کل", "همه"):
         return "ALL"
@@ -235,20 +253,34 @@ def parse_money(text):
         return "THIRD"
 
     match = re.fullmatch(
-        r"([0-9]+(?:\.[0-9]+)?)\s*(کا|میل|بیل|تیل|کیل)?",
+        r"([0-9]+(?:\.[0-9]+)?)(کا|میل|بیل|تیل|کیل)?",
         text
     )
 
     if not match:
         return None
 
-    number = float(match.group(1))
+    number_text = match.group(1)
     unit = match.group(2)
 
-    if unit:
-        return int(number * UNITS[unit])
+    if "." in number_text:
+        whole, decimal = number_text.split(".", 1)
 
-    return int(number)
+        if unit:
+            base = int(whole) * UNITS[unit]
+            decimal_value = int(decimal) * UNITS[unit]
+            decimal_value //= 10 ** len(decimal)
+
+            return base + decimal_value
+
+        return int(float(number_text))
+
+    number = int(number_text)
+
+    if unit:
+        return number * UNITS[unit]
+
+    return number
 
 
 def resolve_amount(text, balance):
@@ -286,14 +318,20 @@ def take_bet(user_id, amount):
         return False, balance
 
     if user_id != OWNER_ID:
-        set_wallet(user_id, balance - amount)
+        set_wallet(
+            user_id,
+            balance - amount
+        )
 
     return True, balance
 
 
 def win_bet(user_id, amount):
     if user_id != OWNER_ID:
-        add_wallet(user_id, amount * 2)
+        add_wallet(
+            user_id,
+            amount * 2
+        )
 
     return get_wallet(user_id)
 
@@ -304,21 +342,30 @@ def win_bet(user_id, amount):
 
 async def balance_command(update):
     user = update.effective_user
+
+    if not user:
+        return
+
     ensure_user(user)
 
     wallet = get_wallet(user.id)
 
     if user.id == OWNER_ID:
+
         record_text = "نامحدود"
         rank = 1
+
     else:
+
         row = db.execute(
             "SELECT record FROM users WHERE user_id=?",
             (user.id,)
         ).fetchone()
 
-        record = row["record"] if row else 0
+        record = int(row["record"]) if row else 0
+
         record_text = format_money(record)
+
         rank = get_rank(user.id)
 
     await update.message.reply_text(
@@ -334,6 +381,7 @@ async def balance_command(update):
 
 async def bank_command(update):
     user = update.effective_user
+
     ensure_user(user)
 
     await update.message.reply_text(
@@ -344,23 +392,38 @@ async def bank_command(update):
 
 async def bank_deposit(update, amount_text):
     user = update.effective_user
+
     ensure_user(user)
 
     wallet = get_wallet(user.id)
-    amount = resolve_amount(amount_text, wallet)
+
+    amount = resolve_amount(
+        amount_text,
+        wallet
+    )
 
     if amount is None or amount <= 0:
-        await update.message.reply_text("مقدار سکه اشتباهه ❌")
+        await update.message.reply_text(
+            "مقدار سکه اشتباهه ❌"
+        )
         return
 
     if user.id != OWNER_ID and wallet < amount:
-        await update.message.reply_text("موجودی شما کافی نیست ❌")
+        await update.message.reply_text(
+            "موجودی شما کافی نیست ❌"
+        )
         return
 
     if user.id != OWNER_ID:
-        set_wallet(user.id, wallet - amount)
+        set_wallet(
+            user.id,
+            wallet - amount
+        )
 
-    add_bank(user.id, amount)
+    add_bank(
+        user.id,
+        amount
+    )
 
     await update.message.reply_text(
         f"واریز به بانک با موفقیت انجام شد ✅\n\n"
@@ -372,13 +435,20 @@ async def bank_deposit(update, amount_text):
 
 async def bank_withdraw(update, amount_text):
     user = update.effective_user
+
     ensure_user(user)
 
     bank = get_bank(user.id)
-    amount = resolve_amount(amount_text, bank)
+
+    amount = resolve_amount(
+        amount_text,
+        bank
+    )
 
     if amount is None or amount <= 0:
-        await update.message.reply_text("مقدار سکه اشتباهه ❌")
+        await update.message.reply_text(
+            "مقدار سکه اشتباهه ❌"
+        )
         return
 
     if bank < amount:
@@ -387,10 +457,18 @@ async def bank_withdraw(update, amount_text):
         )
         return
 
-    add_bank(user.id, -amount)
+    add_bank(
+        user.id,
+        -amount
+    )
 
     if user.id != OWNER_ID:
-        add_wallet(user.id, amount)
+        add_wallet(
+            user.id,
+            amount
+        )
+
+    update_record(user.id)
 
     await update.message.reply_text(
         f"برداشت از بانک با موفقیت انجام شد ✅\n\n"
@@ -401,19 +479,22 @@ async def bank_withdraw(update, amount_text):
 
 
 # =========================================================
-# انتقال
+# انتقال سکه
 # =========================================================
 
 async def transfer_command(update, amount_text):
     user = update.effective_user
+
     ensure_user(user)
 
     message = update.message
 
     if not message.reply_to_message:
+
         await message.reply_text(
             "برای انتقال سکه باید روی پیام طرف ریپلای کنی ❌"
         )
+
         return
 
     target = message.reply_to_message.from_user
@@ -422,28 +503,49 @@ async def transfer_command(update, amount_text):
         return
 
     if target.id == user.id:
+
         await message.reply_text(
             "نمیشه به خودت سکه انتقال بدی 😂"
         )
+
         return
 
     ensure_user(target)
 
     balance = get_wallet(user.id)
-    amount = resolve_amount(amount_text, balance)
+
+    amount = resolve_amount(
+        amount_text,
+        balance
+    )
 
     if amount is None or amount <= 0:
-        await message.reply_text("مقدار سکه اشتباهه ❌")
+
+        await message.reply_text(
+            "مقدار سکه اشتباهه ❌"
+        )
+
         return
 
     if user.id != OWNER_ID and balance < amount:
-        await message.reply_text("موجودی شما کافی نیست ❌")
+
+        await message.reply_text(
+            "موجودی شما کافی نیست ❌"
+        )
+
         return
 
     if user.id != OWNER_ID:
-        set_wallet(user.id, balance - amount)
 
-    add_wallet(target.id, amount)
+        set_wallet(
+            user.id,
+            balance - amount
+        )
+
+    add_wallet(
+        target.id,
+        amount
+    )
 
     update_record(user.id)
     update_record(target.id)
@@ -464,6 +566,7 @@ async def transfer_command(update, amount_text):
 
 def create_code():
     chars = string.ascii_letters + string.digits
+
     return "".join(
         secrets.choice(chars)
         for _ in range(20)
@@ -472,27 +575,40 @@ def create_code():
 
 async def create_serial(update, amount_text):
     user = update.effective_user
+
     ensure_user(user)
 
     balance = get_wallet(user.id)
-    amount = resolve_amount(amount_text, balance)
+
+    amount = resolve_amount(
+        amount_text,
+        balance
+    )
 
     if amount is None or amount <= 0:
+
         await update.message.reply_text(
             "مقدار سریال اشتباهه ❌"
         )
+
         return
 
     if user.id != OWNER_ID and balance < amount:
+
         await update.message.reply_text(
             "موجودی شما کافی نیست ❌"
         )
+
         return
 
     code = create_code()
 
     if user.id != OWNER_ID:
-        set_wallet(user.id, balance - amount)
+
+        set_wallet(
+            user.id,
+            balance - amount
+        )
 
     db.execute("""
         INSERT INTO serials
@@ -502,6 +618,7 @@ async def create_serial(update, amount_text):
         code,
         amount,
         user.id,
+        0,
         int(time.time())
     ))
 
@@ -517,37 +634,54 @@ async def create_serial(update, amount_text):
 
 async def use_serial(update, code):
     user = update.effective_user
+
     ensure_user(user)
 
     code = code.strip()
 
     row = db.execute(
-        "SELECT * FROM serials "
-        "WHERE code=? AND used=0",
+        """
+        SELECT *
+        FROM serials
+        WHERE code=?
+        AND used=0
+        """,
         (code,)
     ).fetchone()
 
     if not row:
+
         await update.message.reply_text(
             "این سریال نامعتبره یا قبلاً استفاده شده ❌"
         )
+
         return
 
-    amount = row["amount"]
+    amount = int(row["amount"])
 
     db.execute(
-        "UPDATE serials SET used=1 WHERE code=?",
+        """
+        UPDATE serials
+        SET used=1
+        WHERE code=?
+        AND used=0
+        """,
         (code,)
     )
 
     db.commit()
 
-    add_wallet(user.id, amount)
+    add_wallet(
+        user.id,
+        amount
+    )
+
     update_record(user.id)
 
     await update.message.reply_text(
         f"سریال با موفقیت فعال شد ✅\n\n"
-        f"سکه دریافت‌شده = {format_money(amount)} 💰\n\n"
+        f"سکه دریافت‌شده = "
+        f"{format_money(amount)} 💰\n\n"
         f"موجودی فعلی شما = "
         f"{format_money(get_wallet(user.id))} 💰"
     )
@@ -567,21 +701,28 @@ def miner_rate(level):
 
 def miner_stats(user_id):
     rows = db.execute(
-        "SELECT * FROM miners WHERE user_id=?",
+        """
+        SELECT *
+        FROM miners
+        WHERE user_id=?
+        """,
         (user_id,)
     ).fetchall()
 
     total = 0
+
     now = int(time.time())
 
     for row in rows:
+
         elapsed = max(
             0,
-            now - row["last_claim"]
+            now - int(row["last_claim"])
         )
 
-        total += elapsed * miner_rate(
-            row["level"]
+        total += (
+            elapsed *
+            miner_rate(int(row["level"]))
         )
 
     return rows, total
@@ -589,37 +730,54 @@ def miner_stats(user_id):
 
 async def buy_miner(update, count, level):
     user = update.effective_user
+
     ensure_user(user)
 
     if count <= 0 or level <= 0:
+
+        await update.message.reply_text(
+            "تعداد یا سطح ماینر اشتباهه ❌"
+        )
+
         return
 
     price = miner_price(level)
+
     total = price * count
 
     balance = get_wallet(user.id)
 
     if user.id != OWNER_ID and balance < total:
+
         await update.message.reply_text(
             "موجودی شما کافی نیست ❌"
         )
+
         return
 
     if user.id != OWNER_ID:
-        set_wallet(user.id, balance - total)
+
+        set_wallet(
+            user.id,
+            balance - total
+        )
 
     now = int(time.time())
 
     for _ in range(count):
-        db.execute("""
+
+        db.execute(
+            """
             INSERT INTO miners
             (user_id, level, last_claim)
             VALUES (?, ?, ?)
-        """, (
-            user.id,
-            level,
-            now
-        ))
+            """,
+            (
+                user.id,
+                level,
+                now
+            )
+        )
 
     db.commit()
 
@@ -627,8 +785,10 @@ async def buy_miner(update, count, level):
         f"خرید ماینر با موفقیت انجام شد ✅\n\n"
         f"تعداد = {count} ماینر\n"
         f"سطح = {level}\n\n"
-        f"قیمت هر ماینر = {format_money(price)} 💰\n"
-        f"مبلغ پرداختی = {format_money(total)} 💰\n\n"
+        f"قیمت هر ماینر = "
+        f"{format_money(price)} 💰\n"
+        f"مبلغ پرداختی = "
+        f"{format_money(total)} 💰\n\n"
         f"تولید هر ماینر = "
         f"{format_money(miner_rate(level))} سکه در ثانیه 💰"
     )
@@ -636,14 +796,17 @@ async def buy_miner(update, count, level):
 
 async def claim_miner(update):
     user = update.effective_user
+
     ensure_user(user)
 
     rows, earned = miner_stats(user.id)
 
     if not rows:
+
         await update.message.reply_text(
             "شما هیچ ماینری ندارید ❌"
         )
+
         return
 
     count = len(rows)
@@ -656,7 +819,11 @@ async def claim_miner(update):
     db.commit()
 
     if user.id != OWNER_ID:
-        add_wallet(user.id, earned)
+
+        add_wallet(
+            user.id,
+            earned
+        )
 
     update_record(user.id)
 
@@ -676,6 +843,7 @@ async def claim_miner(update):
 
 async def rps_game(update, choice, bet_text):
     user = update.effective_user
+
     ensure_user(user)
 
     choices = {
@@ -685,12 +853,18 @@ async def rps_game(update, choice, bet_text):
     }
 
     balance = get_wallet(user.id)
-    bet = resolve_amount(bet_text, balance)
+
+    bet = resolve_amount(
+        bet_text,
+        balance
+    )
 
     if bet is None or bet <= 0:
+
         await update.message.reply_text(
             "مقدار شرط اشتباهه ❌"
         )
+
         return
 
     ok, old_balance = take_bet(
@@ -699,9 +873,11 @@ async def rps_game(update, choice, bet_text):
     )
 
     if not ok:
+
         await update.message.reply_text(
             "موجودی شما کافی نیست ❌"
         )
+
         return
 
     bot_choice = random.choice(
@@ -715,10 +891,15 @@ async def rps_game(update, choice, bet_text):
     }
 
     if choice == bot_choice:
+
         result = "tie"
+
     elif (choice, bot_choice) in wins:
+
         result = "win"
+
     else:
+
         result = "lose"
 
     if result == "win":
@@ -759,7 +940,11 @@ async def rps_game(update, choice, bet_text):
     else:
 
         if user.id != OWNER_ID:
-            add_wallet(user.id, bet)
+
+            add_wallet(
+                user.id,
+                bet
+            )
 
         current = get_wallet(user.id)
 
@@ -786,15 +971,22 @@ async def rps_game(update, choice, bet_text):
 
 async def coin_game(update, guess, bet_text):
     user = update.effective_user
+
     ensure_user(user)
 
     balance = get_wallet(user.id)
-    bet = resolve_amount(bet_text, balance)
+
+    bet = resolve_amount(
+        bet_text,
+        balance
+    )
 
     if bet is None or bet <= 0:
+
         await update.message.reply_text(
             "مقدار شرط اشتباهه ❌"
         )
+
         return
 
     ok, old_balance = take_bet(
@@ -803,9 +995,11 @@ async def coin_game(update, guess, bet_text):
     )
 
     if not ok:
+
         await update.message.reply_text(
             "موجودی شما کافی نیست ❌"
         )
+
         return
 
     result = random.choice([
@@ -827,77 +1021,4 @@ async def coin_game(update, guess, bet_text):
             f"مقدار سکه شرط = "
             f"{format_money(bet)} 💰\n\n"
             f"موجودی قبلی شما = "
-            f"{format_money(old_balance)} 💰\n\n"
-            f"موجودی فعلی شما = "
-            f"{format_money(current)} 💰"
-        )
-
-    else:
-
-        current = get_wallet(user.id)
-
-        text = (
-            "🙁❌ متاسفانه باختی ❌🙁\n\n"
-            f"حدس تو = {guess} 💡\n"
-            f"سمت رو شده = {result} 🪙\n\n"
-            f"مقدار سکه شرط = "
-            f"{format_money(bet)} 💰\n\n"
-            f"موجودی قبلی شما = "
-            f"{format_money(old_balance)} 💰\n\n"
-            f"موجودی فعلی شما = "
-            f"{format_money(current)} 💰"
-        )
-
-    update_record(user.id)
-
-    await update.message.reply_text(text)
-
-
-# =========================================================
-# راست یا چپ
-# =========================================================
-
-async def right_left_game(update, guess, bet_text):
-    user = update.effective_user
-    ensure_user(user)
-
-    balance = get_wallet(user.id)
-    bet = resolve_amount(
-        bet_text,
-        balance
-    )
-
-    if bet is None or bet <= 0:
-        await update.message.reply_text(
-            "مقدار شرط اشتباهه ❌"
-        )
-        return
-
-    ok, old_balance = take_bet(
-        user.id,
-        bet
-    )
-
-    if not ok:
-        await update.message.reply_text(
-            "موجودی شما کافی نیست ❌"
-        )
-        return
-
-    result = random.choice([
-        "راست",
-        "چپ"
-    ])
-
-    if guess == result:
-
-        current = win_bet(
-            user.id,
-            bet
-        )
-
-        text = (
-            "🥳✅ خوشبختانه برنده شدی 🥳✅\n\n"
-            "╭✦───✧◈✧───✦╮\n"
-            "     ✋️          🪸\n"
-            "╰✦───✧◈✧───✦╯\n\n     
+            f"{format_m
