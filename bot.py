@@ -1,8 +1,9 @@
+import os
+
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
-# توکن رباتت را اینجا بعداً از Environment Variable می‌گیریم
-TOKEN = "YOUR_BOT_TOKEN"
+TOKEN = os.getenv("BOT_TOKEN")
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
