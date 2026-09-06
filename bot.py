@@ -18,15 +18,10 @@ from telegram.ext import (
 
 TOKEN = os.getenv("BOT_TOKEN")
 
-print("TOKEN FOUND:", bool(TOKEN))
-print("BOT STARTING...")
-
-# آیدی عددی صاحب ربات را اینجا بگذار
 OWNER_ID = 8981018900
 
 DB_FILE = "moltaf_kid.db"
 
-# موجودی نامحدود صاحب ربات
 OWNER_MONEY = 10**100
 
 
@@ -258,19 +253,14 @@ def parse_amount(text, user_id):
     multipliers = {
         "کا": 10**3,
         "هزار": 10**3,
-
         "میل": 10**6,
         "میلیون": 10**6,
-
         "بیل": 10**9,
         "میلیارد": 10**9,
-
         "تیل": 10**12,
         "تریلیون": 10**12,
-
         "کیل": 10**15,
-
-        "کواد": 10**18
+        "کواد": 10**18,
     }
 
     parts = text.replace(",", "").split()
@@ -542,14 +532,11 @@ async def use_serial(update, user_id, code):
     await update.message.reply_text(
         f"🎉 سریال فعال شد!\n\n"
         f"💰 دریافت کردی: {format_money(amount)}"
-    )
-
-
-# =========================================================
+)# =========================================================
 # MINER
 # =========================================================
 
-def get_miner_data(user_id):
+def get_miner(user_id):
     cur = db.cursor()
 
     cur.execute(
@@ -559,96 +546,102 @@ def get_miner_data(user_id):
 
     row = cur.fetchone()
 
-    if not row:
-        now = time.time()
+    if row:
+        return row
 
+    return None
+
+
+async def buy_miner(update, user_id, count, level):
+    if count <= 0:
+        await update.message.reply_text(
+            "❌ تعداد ماینر درست نیست."
+        )
+        return
+
+    if level < 1:
+        level = 1
+
+    price_per_miner = 1000000 * level
+    total_price = count * price_per_miner
+
+    if user_id != OWNER_ID:
+        if not remove_money(user_id, total_price):
+            await update.message.reply_text(
+                f"❌ سکه کافی نداری.\n"
+                f"💰 قیمت: {format_money(total_price)}"
+            )
+            return
+
+    cur = db.cursor()
+
+    row = get_miner(user_id)
+
+    if row:
+        old_level = row["level"]
+
+        if level > old_level:
+            new_level = level
+        else:
+            new_level = old_level
+
+        cur.execute(
+            """
+            UPDATE miners
+            SET count = count + ?, level = ?
+            WHERE user_id = ?
+            """,
+            (count, new_level, user_id)
+        )
+
+    else:
         cur.execute(
             """
             INSERT INTO miners
             (user_id, count, level, last_claim)
-            VALUES (?, 0, 1, ?)
+            VALUES (?, ?, ?, ?)
             """,
-            (user_id, now)
+            (user_id, count, level, 0)
         )
-
-        db.commit()
-
-        return {
-            "count": 0,
-            "level": 1,
-            "last_claim": now
-        }
-
-    return {
-        "count": row["count"],
-        "level": row["level"],
-        "last_claim": row["last_claim"]
-    }
-
-
-async def buy_miner(update, user_id, count, level):
-    price_each = 1_000_000 * (2 ** (level - 1))
-    total = price_each * count
-
-    if user_id != OWNER_ID:
-        if not remove_money(user_id, total):
-            await update.message.reply_text(
-                f"❌ سکه کافی نداری.\n\n"
-                f"💰 قیمت: {format_money(total)}"
-            )
-            return
-
-    data = get_miner_data(user_id)
-
-    new_count = data["count"] + count
-
-    cur = db.cursor()
-
-    cur.execute(
-        """
-        UPDATE miners
-        SET count = ?,
-            level = ?
-        WHERE user_id = ?
-        """,
-        (new_count, level, user_id)
-    )
 
     db.commit()
 
     await update.message.reply_text(
-        f"⛏ ماینر خریداری شد!\n\n"
-        f"🔢 تعداد: {count}\n"
-        f"⭐ سطح: {level}\n"
-        f"💰 هزینه: {format_money(total)}"
+        f"⛏ {count} ماینر سطح {level} خریدی!\n"
+        f"💰 هزینه: {format_money(total_price)}"
     )
 
 
 async def claim_miner(update, user_id):
-    data = get_miner_data(user_id)
+    row = get_miner(user_id)
 
-    count = data["count"]
-    level = data["level"]
-    last_claim = data["last_claim"]
-
-    if count <= 0:
+    if not row or row["count"] <= 0:
         await update.message.reply_text(
-            "⛏ هنوز ماینری نداری."
+            "❌ هنوز ماینری نداری."
         )
         return
 
     now = time.time()
+    last_claim = row["last_claim"]
 
-    seconds = int(now - last_claim)
+    cooldown = 3600
 
-    if seconds <= 0:
+    if last_claim and now - last_claim < cooldown:
+        remaining = int(
+            cooldown - (now - last_claim)
+        )
+
+        minutes = remaining // 60
+        seconds = remaining % 60
+
         await update.message.reply_text(
-            "⏳ هنوز چیزی برای برداشت جمع نشده."
+            f"⏳ هنوز وقت برداشت نرسیده.\n"
+            f"🕐 {minutes} دقیقه و {seconds} ثانیه باقی مانده."
         )
         return
 
-    rate = 1000 * level
-    reward = seconds * count * rate
+    reward_per_miner = 500000 * row["level"]
+    reward = row["count"] * reward_per_miner
 
     cur = db.cursor()
 
@@ -667,8 +660,9 @@ async def claim_miner(update, user_id):
 
     await update.message.reply_text(
         f"⛏ برداشت ماینر انجام شد!\n\n"
-        f"⏱ زمان: {seconds} ثانیه\n"
-        f"💰 دریافت: {format_money(reward)}"
+        f"⛏ تعداد: {row['count']}\n"
+        f"⭐ سطح: {row['level']}\n"
+        f"💰 دریافتی: {format_money(reward)}"
     )
 
 
@@ -676,38 +670,192 @@ async def claim_miner(update, user_id):
 # GAMES
 # =========================================================
 
-async def play_game(update, user_id, amount, win, result_text):
+async def play_rps(update, user_id, choice, amount):
     if amount <= 0:
         await update.message.reply_text(
-            "❌ مقدار شرط درست نیست."
+            "❌ مبلغ درست نیست."
         )
         return
 
-    if user_id != OWNER_ID:
-        if get_money(user_id) < amount:
-            await update.message.reply_text(
-                "❌ سکه کافی نداری."
-            )
-            return
+    if not remove_money(user_id, amount):
+        await update.message.reply_text(
+            "❌ سکه کافی نداری."
+        )
+        return
 
-        remove_money(user_id, amount)
+    choices = [
+        "سنگ",
+        "کاغذ",
+        "قیچی"
+    ]
+
+    bot_choice = random.choice(choices)
+
+    if bot_choice == choice:
+        add_money(user_id, amount)
+
+        await update.message.reply_text(
+            f"🤖 انتخاب من: {bot_choice}\n"
+            f"🤝 مساوی شد!\n"
+            f"💰 سکه‌ات برگشت."
+        )
+        return
+
+    win = (
+        (choice == "سنگ" and bot_choice == "قیچی")
+        or
+        (choice == "کاغذ" and bot_choice == "سنگ")
+        or
+        (choice == "قیچی" and bot_choice == "کاغذ")
+    )
 
     if win:
         reward = amount * 2
 
-        add_money(user_id, reward)
+        add_money(
+            user_id,
+            reward
+        )
 
         await update.message.reply_text(
-            f"{result_text}\n\n"
+            f"🤖 انتخاب من: {bot_choice}\n"
             f"🎉 بردی!\n"
-            f"💰 جایزه: {format_money(reward)}"
+            f"💰 دریافتی: {format_money(reward)}"
         )
 
     else:
         await update.message.reply_text(
-            f"{result_text}\n\n"
+            f"🤖 انتخاب من: {bot_choice}\n"
             f"💀 باختی!\n"
-            f"💸 مبلغ از دست رفته: {format_money(amount)}"
+            f"💸 از دست دادی: {format_money(amount)}"
+        )
+
+
+async def play_coin(update, user_id, choice, amount):
+    if amount <= 0:
+        await update.message.reply_text(
+            "❌ مبلغ درست نیست."
+        )
+        return
+
+    if not remove_money(user_id, amount):
+        await update.message.reply_text(
+            "❌ سکه کافی نداری."
+        )
+        return
+
+    bot_choice = random.choice([
+        "شیر",
+        "خط"
+    ])
+
+    if bot_choice == choice:
+        reward = amount * 2
+
+        add_money(
+            user_id,
+            reward
+        )
+
+        await update.message.reply_text(
+            f"🪙 نتیجه: {bot_choice}\n"
+            f"🎉 بردی!\n"
+            f"💰 دریافتی: {format_money(reward)}"
+        )
+
+    else:
+        await update.message.reply_text(
+            f"🪙 نتیجه: {bot_choice}\n"
+            f"💀 باختی!\n"
+            f"💸 از دست دادی: {format_money(amount)}"
+        )
+
+
+async def play_direction(update, user_id, choice, amount):
+    if amount <= 0:
+        await update.message.reply_text(
+            "❌ مبلغ درست نیست."
+        )
+        return
+
+    if not remove_money(user_id, amount):
+        await update.message.reply_text(
+            "❌ سکه کافی نداری."
+        )
+        return
+
+    bot_choice = random.choice([
+        "راست",
+        "چپ"
+    ])
+
+    if bot_choice == choice:
+        reward = amount * 2
+
+        add_money(
+            user_id,
+            reward
+        )
+
+        await update.message.reply_text(
+            f"🤖 انتخاب من: {bot_choice}\n"
+            f"🎉 درست گفتی!\n"
+            f"💰 دریافتی: {format_money(reward)}"
+        )
+
+    else:
+        await update.message.reply_text(
+            f"🤖 انتخاب من: {bot_choice}\n"
+            f"💀 اشتباه بود!\n"
+            f"💸 از دست دادی: {format_money(amount)}"
+        )
+
+
+async def play_even_odd(update, user_id, choice, amount):
+    if amount <= 0:
+        await update.message.reply_text(
+            "❌ مبلغ درست نیست."
+        )
+        return
+
+    if not remove_money(user_id, amount):
+        await update.message.reply_text(
+            "❌ سکه کافی نداری."
+        )
+        return
+
+    number = random.randint(
+        1,
+        100
+    )
+
+    result = (
+        "زوج"
+        if number % 2 == 0
+        else "فرد"
+    )
+
+    if result == choice:
+        reward = amount * 2
+
+        add_money(
+            user_id,
+            reward
+        )
+
+        await update.message.reply_text(
+            f"🎲 عدد: {number}\n"
+            f"📌 نتیجه: {result}\n"
+            f"🎉 بردی!\n"
+            f"💰 دریافتی: {format_money(reward)}"
+        )
+
+    else:
+        await update.message.reply_text(
+            f"🎲 عدد: {number}\n"
+            f"📌 نتیجه: {result}\n"
+            f"💀 باختی!\n"
+            f"💸 از دست دادی: {format_money(amount)}"
         )
 
 
@@ -716,16 +864,11 @@ async def play_game(update, user_id, amount, win, result_text):
 # =========================================================
 
 HELP_TEXT = """
-╭━━━━━━━ ✦ ملتفت کید ✦ ━━━━━━━╮
+🤖 راهنمای ملتفت کید
 
 💰 اقتصاد:
 
 موجودی
-بالانس
-سکه
-
-🏦 بانک:
-
 بانک
 شارژ بانک 10 میل
 برداشت بانک 5 میل
@@ -747,7 +890,7 @@ HELP_TEXT = """
 خرید 5 ماینر سطح 2
 برداشت ماینر
 
-🎮 بازی:
+🎮 بازی‌ها:
 
 سنگ 5 میل
 کاغذ 5 میل
@@ -762,15 +905,11 @@ HELP_TEXT = """
 زوج 5 میل
 فرد 5 میل
 
-⚙️ مدیریت:
+👑 فعال‌سازی گروه:
+
+فقط مالک:
 
 فعال
-
-━━━━━━━━━━━━━━━━━━━━
-
-💰 واحد اقتصاد: سکه
-
-╰━━━━━━━ ✦ ملتفت کید ✦ ━━━━━━━╯
 """
 
 
@@ -782,80 +921,102 @@ async def message_handler(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
 ):
+
     if not update.message:
         return
 
-    if not update.message.text:
+    text = update.message.text
+
+    if not text:
         return
 
-    text = update.message.text.strip()
+    text = text.strip()
+    lower = text.lower()
 
-    user = update.effective_user
-
-    if not user:
-        return
-
+    user = update.message.from_user
     user_id = user.id
-
-    chat = update.effective_chat
 
     ensure_user(user_id)
 
-    # فعال کردن گروه
-    if text == "فعال":
+    # -----------------------------------------------------
+    # ACTIVATE GROUP
+    # -----------------------------------------------------
+
+    if lower == "فعال":
+
         if user_id != OWNER_ID:
+            await update.message.reply_text(
+                "❌ فقط مالک ربات می‌تونه گروه رو فعال کنه."
+            )
             return
 
-        if chat.type in ["group", "supergroup"]:
-            activate_group(chat.id)
+        if update.effective_chat.type == "private":
+            await update.message.reply_text(
+                "❌ این دستور برای گروه ساخته شده."
+            )
+            return
+
+        activate_group(
+            update.effective_chat.id
+        )
 
         await update.message.reply_text(
-            "ربات فعال شد ✅\n"
-            "ملتفت کید هستم، سر گرمتون میکنم 🗿"
+            "✅ گروه فعال شد!\n"
+            "🤖 ملتفت کید آماده‌ست."
         )
 
         return
 
-    # در گروه باید فعال شده باشد
-    if chat.type in ["group", "supergroup"]:
-        if not group_is_active(chat.id):
+    # -----------------------------------------------------
+    # CHECK GROUP
+    # -----------------------------------------------------
+
+    if update.effective_chat.type != "private":
+
+        if not group_is_active(
+            update.effective_chat.id
+        ):
             return
 
-    # راهنما
-    if text in ["راهنما", "کمک", "/help"]:
-        await update.message.reply_text(HELP_TEXT)
-        return
+    # -----------------------------------------------------
+    # BALANCE
+    # -----------------------------------------------------
 
-    # موجودی
-    if text in ["موجودی", "بالانس", "سکه"]:
-        money = get_money(user_id)
+    if lower in [
+        "موجودی",
+        "پول",
+        "سکه"
+    ]:
+
+        money = get_money(
+            user_id
+        )
 
         await update.message.reply_text(
-            f"💰 موجودی تو:\n\n"
+            f"💰 موجودی تو:\n"
             f"{format_money(money)}"
         )
 
         return
 
-    # بانک
-    if text in [
-        "بانک",
-        "موجودی بانک",
-        "موجودی حساب بانکی",
-        "موجودی کارت"
-    ]:
-        bank = get_bank(user_id)
+    # -----------------------------------------------------
+    # BANK
+    # -----------------------------------------------------
+
+    if lower == "بانک":
 
         await update.message.reply_text(
-            f"🏦 موجودی بانک:\n\n"
-            f"{format_money(bank)}"
+            f"🏦 موجودی بانک:\n"
+            f"{format_money(get_bank(user_id))}"
         )
 
         return
 
-    # شارژ بانک
-    if text.startswith("شارژ بانک "):
-        amount_text = text[len("شارژ بانک "):].strip()
+    if lower.startswith("شارژ بانک "):
+
+        amount_text = text[
+            len("شارژ بانک "):
+        ]
 
         amount = parse_amount(
             amount_text,
@@ -864,7 +1025,7 @@ async def message_handler(
 
         if amount is None:
             await update.message.reply_text(
-                "❌ مقدار درست وارد کن."
+                "❌ مقدار رو درست وارد کن."
             )
             return
 
@@ -876,9 +1037,11 @@ async def message_handler(
 
         return
 
-    # برداشت بانک
-    if text.startswith("برداشت بانک "):
-        amount_text = text[len("برداشت بانک "):].strip()
+    if lower.startswith("برداشت بانک "):
+
+        amount_text = text[
+            len("برداشت بانک "):
+        ]
 
         amount = parse_amount(
             amount_text,
@@ -887,7 +1050,7 @@ async def message_handler(
 
         if amount is None:
             await update.message.reply_text(
-                "❌ مقدار درست وارد کن."
+                "❌ مقدار رو درست وارد کن."
             )
             return
 
@@ -899,9 +1062,15 @@ async def message_handler(
 
         return
 
-    # انتقال
-    if text.startswith("انتقال "):
-        amount_text = text[len("انتقال "):].strip()
+    # -----------------------------------------------------
+    # TRANSFER
+    # -----------------------------------------------------
+
+    if lower.startswith("انتقال "):
+
+        amount_text = text[
+            len("انتقال "):
+        ]
 
         amount = parse_amount(
             amount_text,
@@ -910,7 +1079,7 @@ async def message_handler(
 
         if amount is None:
             await update.message.reply_text(
-                "❌ مقدار انتقال درست نیست."
+                "❌ مقدار رو درست وارد کن."
             )
             return
 
@@ -922,9 +1091,15 @@ async def message_handler(
 
         return
 
-    # ساخت سریال
-    if text.startswith("ساخت سریال "):
-        amount_text = text[len("ساخت سریال "):].strip()
+    # -----------------------------------------------------
+    # CREATE SERIAL
+    # -----------------------------------------------------
+
+    if lower.startswith("ساخت سریال "):
+
+        amount_text = text[
+            len("ساخت سریال "):
+        ]
 
         amount = parse_amount(
             amount_text,
@@ -933,7 +1108,7 @@ async def message_handler(
 
         if amount is None:
             await update.message.reply_text(
-                "❌ مبلغ سریال درست نیست."
+                "❌ مقدار رو درست وارد کن."
             )
             return
 
@@ -945,9 +1120,21 @@ async def message_handler(
 
         return
 
-    # استفاده از سریال
-    if text.startswith("سریال "):
-        code = text[len("سریال "):].strip()
+    # -----------------------------------------------------
+    # USE SERIAL
+    # -----------------------------------------------------
+
+    if lower.startswith("سریال "):
+
+        code = text[
+            len("سریال "):
+        ].strip()
+
+        if not code:
+            await update.message.reply_text(
+                "❌ کد سریال رو وارد کن."
+            )
+            return
 
         await use_serial(
             update,
@@ -957,41 +1144,54 @@ async def message_handler(
 
         return
 
-    # خرید ماینر
-    if text.startswith("خرید ") and "ماینر" in text:
+    # -----------------------------------------------------
+    # BUY MINER
+    # -----------------------------------------------------
+
+    if (
+        lower.startswith("خرید ")
+        and "ماینر" in lower
+    ):
+
         parts = text.split()
 
         try:
             count = int(parts[1])
-        except (ValueError, IndexError):
+
+        except (
+            ValueError,
+            IndexError
+        ):
+
             await update.message.reply_text(
-                "❌ تعداد ماینر درست نیست."
+                "❌ تعداد ماینر رو درست وارد کن."
             )
+
             return
 
         level = 1
 
         if "سطح" in parts:
+
             try:
-                index = parts.index("سطح")
-                level = int(parts[index + 1])
-            except (ValueError, IndexError):
+                index = parts.index(
+                    "سطح"
+                )
+
+                level = int(
+                    parts[index + 1]
+                )
+
+            except (
+                ValueError,
+                IndexError
+            ):
+
                 await update.message.reply_text(
                     "❌ سطح ماینر درست نیست."
                 )
+
                 return
-
-        if count <= 0:
-            await update.message.reply_text(
-                "❌ تعداد درست نیست."
-            )
-            return
-
-        if level < 1 or level > 100:
-            await update.message.reply_text(
-                "❌ سطح باید بین 1 تا 100 باشد."
-            )
-            return
 
         await buy_miner(
             update,
@@ -1002,25 +1202,35 @@ async def message_handler(
 
         return
 
-    # برداشت ماینر
-    if text == "برداشت ماینر":
+    # -----------------------------------------------------
+    # CLAIM MINER
+    # -----------------------------------------------------
+
+    if lower == "برداشت ماینر":
+
         await claim_miner(
             update,
             user_id
         )
+
         return
 
-    # سنگ کاغذ قیچی
-    choices = [
+    # -----------------------------------------------------
+    # ROCK PAPER SCISSORS
+    # -----------------------------------------------------
+
+    for choice in [
         "سنگ",
         "کاغذ",
         "قیچی"
-    ]
+    ]:
 
-    for choice in choices:
-        if text.startswith(choice + " "):
+        if lower.startswith(
+            choice + " "
+        ):
+
             amount_text = text[
-                len(choice) + 1:
+                len(choice):
             ].strip()
 
             amount = parse_amount(
@@ -1030,126 +1240,196 @@ async def message_handler(
 
             if amount is None:
                 await update.message.reply_text(
-                    "❌ مقدار شرط درست نیست."
+                    "❌ مبلغ درست نیست."
                 )
                 return
 
-            bot_choice = random.choice(choices)
+            await play_rps(
+                update,
+                user_id,
+                choice,
+                amount
+            )
 
-                      if bot_choice == choice:
+            return
+
+    # -----------------------------------------------------
+    # COIN
+    # -----------------------------------------------------
+
+    for choice in [
+        "شیر",
+        "خط"
+    ]:
+
+        if lower.startswith(
+            choice + " "
+        ):
+
+            amount_text = text[
+                len(choice):
+            ].strip()
+
+            amount = parse_amount(
+                amount_text,
+                user_id
+            )
+
+            if amount is None:
                 await update.message.reply_text(
-                    f"🤝 مساوی شد!\n\n"
-                    f"🤖 ربات: {bot_choice}\n"
-                    f"👤 تو: {choice}\n\n"
-                    f"💰 شرطت برگشت."
+                    "❌ مبلغ درست نیست."
                 )
                 return
 
-            win = (
-                (choice == "سنگ" and bot_choice == "قیچی") or
-                (choice == "کاغذ" and bot_choice == "سنگ") or
-                (choice == "قیچی" and bot_choice == "کاغذ")
-            )
-
-            await play_game(
+            await play_coin(
                 update,
                 user_id,
-                amount,
-                win,
-                f"🤖 ربات: {bot_choice}\n"
-                f"👤 تو: {choice}"
+                choice,
+                amount
             )
 
             return
 
-    # شیر یا خط
-    for coin in ["شیر", "خط"]:
-        if text.startswith(coin + " "):
-            amount_text = text[len(coin) + 1:].strip()
-            amount = parse_amount(amount_text, user_id)
+    # -----------------------------------------------------
+    # DIRECTION
+    # -----------------------------------------------------
+
+    for choice in [
+        "راست",
+        "چپ"
+    ]:
+
+        if lower.startswith(
+            choice + " "
+        ):
+
+            amount_text = text[
+                len(choice):
+            ].strip()
+
+            amount = parse_amount(
+                amount_text,
+                user_id
+            )
 
             if amount is None:
-                await update.message.reply_text("❌ مقدار شرط درست نیست.")
+                await update.message.reply_text(
+                    "❌ مبلغ درست نیست."
+                )
                 return
 
-            result = random.choice(["شیر", "خط"])
-            win = result == coin
-
-            await play_game(
+            await play_direction(
                 update,
                 user_id,
-                amount,
-                win,
-                f"🪙 نتیجه: {result}"
+                choice,
+                amount
             )
+
             return
 
-    # راست یا چپ
-    for direction in ["راست", "چپ"]:
-        if text.startswith(direction + " "):
-            amount_text = text[len(direction) + 1:].strip()
-            amount = parse_amount(amount_text, user_id)
+    # -----------------------------------------------------
+    # EVEN / ODD
+    # -----------------------------------------------------
+
+    for choice in [
+        "زوج",
+        "فرد"
+    ]:
+
+        if lower.startswith(
+            choice + " "
+        ):
+
+            amount_text = text[
+                len(choice):
+            ].strip()
+
+            amount = parse_amount(
+                amount_text,
+                user_id
+            )
 
             if amount is None:
-                await update.message.reply_text("❌ مقدار شرط درست نیست.")
+                await update.message.reply_text(
+                    "❌ مبلغ درست نیست."
+                )
                 return
 
-            result = random.choice(["راست", "چپ"])
-            win = result == direction
-
-            await play_game(
+            await play_even_odd(
                 update,
                 user_id,
-                amount,
-                win,
-                f"🎯 نتیجه: {result}"
+                choice,
+                amount
             )
+
             return
 
-    # زوج یا فرد
-    for parity in ["زوج", "فرد"]:
-        if text.startswith(parity + " "):
-            amount_text = text[len(parity) + 1:].strip()
-            amount = parse_amount(amount_text, user_id)
+    # -----------------------------------------------------
+    # HELP
+    # -----------------------------------------------------
 
-            if amount is None:
-                await update.message.reply_text("❌ مقدار شرط درست نیست.")
-                return
+    if lower in [
+        "کمک",
+        "راهنما",
+        "help"
+    ]:
 
-            number = random.randint(1, 100)
-            result = "زوج" if number % 2 == 0 else "فرد"
-            win = result == parity
+        await update.message.reply_text(
+            HELP_TEXT
+        )
+# =========================================================
+# ERROR HANDLER
+# =========================================================
 
-            await play_game(
-                update,
-                user_id,
-                amount,
-                win,
-                f"🎲 عدد: {number}\n"
-                f"📌 نتیجه: {result}"
-            )
-            return
+async def error_handler(
+    update: object,
+    context: ContextTypes.DEFAULT_TYPE
+):
+    print("ERROR:", context.error)
 
 
 # =========================================================
 # MAIN
 # =========================================================
 
-if __name__ == "__main__":
+def main():
+
     init_db()
 
+    print("TOKEN FOUND:", bool(TOKEN))
+
     if not TOKEN:
-        print("ERROR: BOT_TOKEN پیدا نشد!")
-    else:
-        app = Application.builder().token(TOKEN).build()
+        print("❌ BOT_TOKEN پیدا نشد.")
+        return
 
-        app.add_handler(
-            MessageHandler(
-                filters.TEXT & ~filters.COMMAND,
-                message_handler
-            )
+    print("BOT STARTING...")
+
+    app = (
+        Application.builder()
+        .token(TOKEN)
+        .build()
+    )
+
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            message_handler
         )
+    )
 
-        print("BOT IS ONLINE ✅")
+    app.add_error_handler(
+        error_handler
+    )
 
-        app.run_polling()
+    print("🤖 ملتفت کید آنلاین شد!")
+
+    app.run_polling()
+
+
+# =========================================================
+# START BOT
+# =========================================================
+
+if __name__ == "__main__":
+    main()
+        return
