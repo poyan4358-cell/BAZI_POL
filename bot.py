@@ -18,6 +18,9 @@ from telegram.ext import (
 
 TOKEN = os.getenv("BOT_TOKEN")
 
+print("TOKEN FOUND:", bool(TOKEN))
+print("BOT STARTING...")
+
 # آیدی عددی صاحب ربات را اینجا بگذار
 OWNER_ID = 8981018900
 
