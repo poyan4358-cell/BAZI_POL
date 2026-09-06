@@ -1037,3 +1037,18 @@ async def message_handler(
             bot_choice = random.choice(choices)
 
           
+if __name__ == "__main__":
+    init_db()
+
+    app = Application.builder().token(TOKEN).build()
+
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            message_handler
+        )
+    )
+
+    print("BOT IS ONLINE ✅")
+
+    app.run_polling()
