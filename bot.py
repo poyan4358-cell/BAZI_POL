@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import random
 import string
@@ -15,7 +16,7 @@ from telegram.ext import (
 # تنظیمات
 # =========================================================
 
-TOKEN = "توکن_واقعی_رباتت"
+TOKEN = os.getenv("BOT_TOKEN")
 OWNER_ID = 123456789
 
 DB_FILE = "moltaf_kid.db"
