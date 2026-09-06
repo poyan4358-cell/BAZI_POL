@@ -19,7 +19,7 @@ from telegram.ext import (
 TOKEN = os.getenv("BOT_TOKEN")
 
 # آیدی عددی صاحب ربات را اینجا بگذار
-OWNER_ID = 123456789
+OWNER_ID = 8981018900
 
 DB_FILE = "moltaf_kid.db"
 
