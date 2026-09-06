@@ -1036,4 +1036,120 @@ async def message_handler(
 
             bot_choice = random.choice(choices)
 
-          
+                      if bot_choice == choice:
+                await update.message.reply_text(
+                    f"🤝 مساوی شد!\n\n"
+                    f"🤖 ربات: {bot_choice}\n"
+                    f"👤 تو: {choice}\n\n"
+                    f"💰 شرطت برگشت."
+                )
+                return
+
+            win = (
+                (choice == "سنگ" and bot_choice == "قیچی") or
+                (choice == "کاغذ" and bot_choice == "سنگ") or
+                (choice == "قیچی" and bot_choice == "کاغذ")
+            )
+
+            await play_game(
+                update,
+                user_id,
+                amount,
+                win,
+                f"🤖 ربات: {bot_choice}\n"
+                f"👤 تو: {choice}"
+            )
+
+            return
+
+    # شیر یا خط
+    for coin in ["شیر", "خط"]:
+        if text.startswith(coin + " "):
+            amount_text = text[len(coin) + 1:].strip()
+            amount = parse_amount(amount_text, user_id)
+
+            if amount is None:
+                await update.message.reply_text("❌ مقدار شرط درست نیست.")
+                return
+
+            result = random.choice(["شیر", "خط"])
+            win = result == coin
+
+            await play_game(
+                update,
+                user_id,
+                amount,
+                win,
+                f"🪙 نتیجه: {result}"
+            )
+            return
+
+    # راست یا چپ
+    for direction in ["راست", "چپ"]:
+        if text.startswith(direction + " "):
+            amount_text = text[len(direction) + 1:].strip()
+            amount = parse_amount(amount_text, user_id)
+
+            if amount is None:
+                await update.message.reply_text("❌ مقدار شرط درست نیست.")
+                return
+
+            result = random.choice(["راست", "چپ"])
+            win = result == direction
+
+            await play_game(
+                update,
+                user_id,
+                amount,
+                win,
+                f"🎯 نتیجه: {result}"
+            )
+            return
+
+    # زوج یا فرد
+    for parity in ["زوج", "فرد"]:
+        if text.startswith(parity + " "):
+            amount_text = text[len(parity) + 1:].strip()
+            amount = parse_amount(amount_text, user_id)
+
+            if amount is None:
+                await update.message.reply_text("❌ مقدار شرط درست نیست.")
+                return
+
+            number = random.randint(1, 100)
+            result = "زوج" if number % 2 == 0 else "فرد"
+            win = result == parity
+
+            await play_game(
+                update,
+                user_id,
+                amount,
+                win,
+                f"🎲 عدد: {number}\n"
+                f"📌 نتیجه: {result}"
+            )
+            return
+
+
+# =========================================================
+# MAIN
+# =========================================================
+
+if __name__ == "__main__":
+    init_db()
+
+    if not TOKEN:
+        print("ERROR: BOT_TOKEN پیدا نشد!")
+    else:
+        app = Application.builder().token(TOKEN).build()
+
+        app.add_handler(
+            MessageHandler(
+                filters.TEXT & ~filters.COMMAND,
+                message_handler
+            )
+        )
+
+        print("BOT IS ONLINE ✅")
+
+        app.run_polling()
