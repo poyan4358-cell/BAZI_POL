@@ -16,10 +16,10 @@ from telegram.ext import (
 # SETTINGS
 # =========================================================
 
-TOKEN = os.getenv("AAGE6YzfGJF-93FrfjuCQ9ZcVI-jWFgTFaA")
+TOKEN = os.getenv("BOT_TOKEN")
 
 # آیدی عددی صاحب ربات را اینجا بگذار
-OWNER_ID = 8981018900
+OWNER_ID = 12345678
 
 DB_FILE = "moltaf_kid.db"
 
