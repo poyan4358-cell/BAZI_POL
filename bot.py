@@ -26,7 +26,7 @@ OWNER_MONEY = 10**100
 
 
 # =========================================================
-# DATABASE
+# DATABASE CONNECTION
 # =========================================================
 
 db = sqlite3.connect(
@@ -76,7 +76,7 @@ def init_db():
 
 
 # =========================================================
-# USERS / MONEY
+# USER
 # =========================================================
 
 def ensure_user(user_id):
@@ -96,6 +96,10 @@ def ensure_user(user_id):
 
     db.commit()
 
+
+# =========================================================
+# MONEY
+# =========================================================
 
 def get_money(user_id):
     if user_id == OWNER_ID:
@@ -227,9 +231,7 @@ def remove_bank(user_id, amount):
     db.commit()
 
     return True
-
-
-# =========================================================
+    # =========================================================
 # AMOUNT PARSER
 # =========================================================
 
@@ -311,7 +313,7 @@ def format_money(amount):
 
 
 # =========================================================
-# GROUP
+# GROUP SYSTEM
 # =========================================================
 
 def group_is_active(chat_id):
@@ -328,7 +330,10 @@ def group_is_active(chat_id):
 
     row = cur.fetchone()
 
-    return bool(row["active"]) if row else False
+    if row:
+        return bool(row["active"])
+
+    return False
 
 
 def activate_group(chat_id):
@@ -390,10 +395,8 @@ async def bank_withdraw(update, user_id, amount):
 
     await update.message.reply_text(
         f"💳 {format_money(amount)} از بانک برداشت شد."
-    )
-
-
-# =========================================================
+        )
+    # =========================================================
 # TRANSFER
 # =========================================================
 
@@ -532,7 +535,8 @@ async def use_serial(update, user_id, code):
     await update.message.reply_text(
         f"🎉 سریال فعال شد!\n\n"
         f"💰 دریافت کردی: {format_money(amount)}"
-)# =========================================================
+            )
+    # =========================================================
 # MINER
 # =========================================================
 
@@ -663,11 +667,9 @@ async def claim_miner(update, user_id):
         f"⛏ تعداد: {row['count']}\n"
         f"⭐ سطح: {row['level']}\n"
         f"💰 دریافتی: {format_money(reward)}"
-    )
-
-
-# =========================================================
-# GAMES
+)
+    # =========================================================
+# GAME: ROCK PAPER SCISSORS
 # =========================================================
 
 async def play_rps(update, user_id, choice, amount):
@@ -692,13 +694,17 @@ async def play_rps(update, user_id, choice, amount):
     bot_choice = random.choice(choices)
 
     if bot_choice == choice:
-        add_money(user_id, amount)
+        add_money(
+            user_id,
+            amount
+        )
 
         await update.message.reply_text(
             f"🤖 انتخاب من: {bot_choice}\n"
             f"🤝 مساوی شد!\n"
             f"💰 سکه‌ات برگشت."
         )
+
         return
 
     win = (
@@ -730,6 +736,10 @@ async def play_rps(update, user_id, choice, amount):
             f"💸 از دست دادی: {format_money(amount)}"
         )
 
+
+# =========================================================
+# GAME: COIN
+# =========================================================
 
 async def play_coin(update, user_id, choice, amount):
     if amount <= 0:
@@ -771,6 +781,10 @@ async def play_coin(update, user_id, choice, amount):
         )
 
 
+# =========================================================
+# GAME: RIGHT / LEFT
+# =========================================================
+
 async def play_direction(update, user_id, choice, amount):
     if amount <= 0:
         await update.message.reply_text(
@@ -808,8 +822,10 @@ async def play_direction(update, user_id, choice, amount):
             f"🤖 انتخاب من: {bot_choice}\n"
             f"💀 اشتباه بود!\n"
             f"💸 از دست دادی: {format_money(amount)}"
-        )
-
+    )
+        # =========================================================
+# GAME: EVEN / ODD
+# =========================================================
 
 async def play_even_odd(update, user_id, choice, amount):
     if amount <= 0:
@@ -911,10 +927,8 @@ HELP_TEXT = """
 
 فعال
 """
-
-
 # =========================================================
-# MESSAGE HANDLER
+# MESSAGE HANDLER - PART 1
 # =========================================================
 
 async def message_handler(
@@ -1090,6 +1104,9 @@ async def message_handler(
         )
 
         return
+        # =========================================================
+# MESSAGE HANDLER - PART 2
+# =========================================================
 
     # -----------------------------------------------------
     # CREATE SERIAL
@@ -1252,9 +1269,12 @@ async def message_handler(
             )
 
             return
+            # =========================================================
+# MESSAGE HANDLER - PART 3
+# =========================================================
 
     # -----------------------------------------------------
-    # COIN
+    # COIN GAME
     # -----------------------------------------------------
 
     for choice in [
@@ -1291,7 +1311,7 @@ async def message_handler(
             return
 
     # -----------------------------------------------------
-    # DIRECTION
+    # DIRECTION GAME
     # -----------------------------------------------------
 
     for choice in [
@@ -1328,7 +1348,7 @@ async def message_handler(
             return
 
     # -----------------------------------------------------
-    # EVEN / ODD
+    # EVEN / ODD GAME
     # -----------------------------------------------------
 
     for choice in [
@@ -1377,7 +1397,139 @@ async def message_handler(
         await update.message.reply_text(
             HELP_TEXT
         )
+
+        return
+        # =========================================================
+# MESSAGE HANDLER - PART 3
 # =========================================================
+
+    # -----------------------------------------------------
+    # COIN GAME
+    # -----------------------------------------------------
+
+    for choice in [
+        "شیر",
+        "خط"
+    ]:
+
+        if lower.startswith(
+            choice + " "
+        ):
+
+            amount_text = text[
+                len(choice):
+            ].strip()
+
+            amount = parse_amount(
+                amount_text,
+                user_id
+            )
+
+            if amount is None:
+                await update.message.reply_text(
+                    "❌ مبلغ درست نیست."
+                )
+                return
+
+            await play_coin(
+                update,
+                user_id,
+                choice,
+                amount
+            )
+
+            return
+
+    # -----------------------------------------------------
+    # DIRECTION GAME
+    # -----------------------------------------------------
+
+    for choice in [
+        "راست",
+        "چپ"
+    ]:
+
+        if lower.startswith(
+            choice + " "
+        ):
+
+            amount_text = text[
+                len(choice):
+            ].strip()
+
+            amount = parse_amount(
+                amount_text,
+                user_id
+            )
+
+            if amount is None:
+                await update.message.reply_text(
+                    "❌ مبلغ درست نیست."
+                )
+                return
+
+            await play_direction(
+                update,
+                user_id,
+                choice,
+                amount
+            )
+
+            return
+
+    # -----------------------------------------------------
+    # EVEN / ODD GAME
+    # -----------------------------------------------------
+
+    for choice in [
+        "زوج",
+        "فرد"
+    ]:
+
+        if lower.startswith(
+            choice + " "
+        ):
+
+            amount_text = text[
+                len(choice):
+            ].strip()
+
+            amount = parse_amount(
+                amount_text,
+                user_id
+            )
+
+            if amount is None:
+                await update.message.reply_text(
+                    "❌ مبلغ درست نیست."
+                )
+                return
+
+            await play_even_odd(
+                update,
+                user_id,
+                choice,
+                amount
+            )
+
+            return
+
+    # -----------------------------------------------------
+    # HELP
+    # -----------------------------------------------------
+
+    if lower in [
+        "کمک",
+        "راهنما",
+        "help"
+    ]:
+
+        await update.message.reply_text(
+            HELP_TEXT
+        )
+
+        return
+        # =========================================================
 # ERROR HANDLER
 # =========================================================
 
@@ -1432,4 +1584,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-        return
